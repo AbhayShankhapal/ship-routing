@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Route Weather Checker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <style>
+    #map {
+      height: 500px;
+      width: 100%;
+    }
+    .controls {
+      margin: 20px 0;
+    }
+    label {
+      margin-right: 10px;
+    }
+    input, button {
+      margin-right: 20px;
+    }
+    .weather-info {
+      display: none;
+    }
+    .weather-info img {
+      width: 50px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Route Weather Checker</h1>
+
+  <div class="controls">
+    <label for="startLat">Start Latitude: </label>
+    <input type="text" id="startLat" placeholder="Enter start latitude" required>
+    
+    <label for="startLng">Start Longitude: </label>
+    <input type="text" id="startLng" placeholder="Enter start longitude" required>
+
+    <label for="midLat">Mid Latitude: </label>
+    <input type="text" id="midLat" placeholder="Enter midpoint latitude">
+    
+    <label for="midLng">Mid Longitude: </label>
+    <input type="text" id="midLng" placeholder="Enter midpoint longitude">
+
+    <label for="endLat">End Latitude: </label>
+    <input type="text" id="endLat" placeholder="Enter end latitude" required>
+    
+    <label for="endLng">End Longitude: </label>
+    <input type="text" id="endLng" placeholder="Enter end longitude" required>
+    
+    <button id="getRoute">Get Route</button>
+  </div>
+
+  <div class="controls">
+    <button id="prevRoute">Previous Route</button>
+    <button id="nextRoute">Next Route</button>
+    <div class="weather-info">
+      <p id="weatherCity"></p>
+      <p id="weatherTemp"></p>
+      <p id="weatherFeelsLike"></p>
+      <p id="weatherTempMin"></p>
+      <p id="weatherTempMax"></p>
+      <p id="weatherPressure"></p>
+      <p id="weatherSeaLevel"></p>
+      <p id="weatherGrndLevel"></p>
+      <p id="weatherVisibility"></p>
+      <p id="weatherHumidity"></p>
+      <p id="weatherWind"></p>
+      <p id="weatherWindDeg"></p>
+      <p id="weatherWindGust"></p>
+      <p id="weatherClouds"></p>
+      <img id="weatherIcon" class="weather-icon" />
+    </div>
+    <p id="weatherInfo">Weather Info: N/A</p>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    const apiKey = "550d1b69107c02a0d80e2b8ae70b88ac";
+    const apiUrl = "https://api.openweathermap.org/data/2.5/weather?units=metric&lat=";
+
+    let map = L.map('map').setView([53.53296196255539, 9.965629577636719], 5);
+    let routes = [];
+    let currentRouteIndex = 0;
+    let weatherMarkers = [];
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    document.getElementById('getRoute').addEventListener('click', () => {
+      const startLat = document.getElementById('startLat').value;
+      const startLng = document.getElementById('startLng').value;
+      const midLat = document.getElementById('midLat').value;
+      const midLng = document.getElementById('midLng').value;
+      const endLat = document.getElementById('endLat').value;
+      const endLng = document.getElementById('endLng').value;
+
+      // Generate URLs for different routes
+      const routeApiUrls = [
+        `https://api.searoutes.com/route/v2/sea/${startLng}%2C${startLat}%3B${endLng}%2C${endLat}?continuousCoordinates=true&allowIceAreas=false&avoidHRA=false&avoidSeca=false`,
+        `https://api.searoutes.com/route/v2/sea/${startLng}%2C${startLat}%3B${midLng}%2C${midLat}%3B${endLng}%2C${endLat}?continuousCoordinates=true&allowIceAreas=false&avoidHRA=false&avoidSeca=false`
+      ];
+
+      Promise.all(routeApiUrls.map(url => fetch(url, {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+          'x-api-key': 'TUjt4iI1xo3emCoI0kbpJah7rR9jBEBH3msDs875'
+        }
+      }).then(response => response.json())))
+      .then(routesData => {
+        if (window.currentRouteLayer) {
+          map.removeLayer(window.currentRouteLayer);
+        }
+        weatherMarkers.forEach(marker => map.removeLayer(marker));
+        weatherMarkers = [];
+
+        routes = routesData.map(data => ({
+          coordinates: data.features[0].geometry.coordinates.map(coord => [coord[1], coord[0]]),
+          routeLayer: L.polyline(data.features[0].geometry.coordinates.map(coord => [coord[1], coord[0]]), { color: 'blue' })
+        }));
+
+        // Show the first route
+        showRoute(0);
+      })
+      .catch(err => console.error('Route API Error:', err));
+    });
+
+    function showRoute(index) {
+      if (routes.length > 0) {
+        if (window.currentRouteLayer) {
+          map.removeLayer(window.currentRouteLayer);
+        }
+        window.currentRouteLayer = routes[index].routeLayer.addTo(map);
+        map.fitBounds(window.currentRouteLayer.getBounds());
+
+        // Fetch weather data for all coordinates
+        fetchWeatherForAllCoords(routes[index].coordinates);
+      }
+    }
+
+    async function fetchWeatherForAllCoords(coordinates) {
+      let weatherData = [];
+      for (const [lat, lng] of coordinates) {
+        const weatherApiUrl = `${apiUrl}${lat}&lon=${lng}&appid=${apiKey}`;
+
+        try {
+          const response = await fetch(weatherApiUrl);
+          if (response.ok) {
+            const data = await response.json();
+            weatherData.push({
+              lat,
+              lng,
+              weatherInfo: data
+            });
+
+            // Add marker with popup to the map
+            const weatherPopupContent = `
+              <strong>Weather Info</strong><br>
+              Temperature: ${data.main.temp} °C<br>
+              Feels Like: ${data.main.feels_like} °C<br>
+              Min Temp: ${data.main.temp_min} °C<br>
+              Max Temp: ${data.main.temp_max} °C<br>
+              Pressure: ${data.main.pressure} hPa<br>
+              Sea Level: ${data.main.sea_level || "N/A"} hPa<br>
+              Ground Level: ${data.main.grnd_level || "N/A"} hPa<br>
+              Humidity: ${data.main.humidity}%<br>
+              Visibility: ${data.visibility / 1000} km<br>
+              Wind Speed: ${data.wind.speed} km/hr<br>
+              Wind Direction: ${data.wind.deg}°<br>
+              Wind Gusts: ${data.wind.gust || "N/A"} m/s<br>
+              Cloudiness: ${data.clouds.all}%
+            `;
+            const marker = L.marker([lat, lng]).addTo(map)
+              .bindPopup(weatherPopupContent);
+
+            weatherMarkers.push(marker);
+
+            // Automatically open the popup for the first coordinate
+            if (coordinates.indexOf([lat, lng]) === 0) {
+              marker.openPopup();
+              updateWeatherInfo(data);
+            }
+          } else {
+            console.error('Weather API Error:', response.status);
+          }
+        } catch (err) {
+          console.error('Weather API Error:', err);
+        }
+      }
+    }
+
+    function updateWeatherInfo(weatherInfo) {
+      document.getElementById('weatherCity').innerText = `City: ${weatherInfo.name || "N/A"}`;
+      document.getElementById('weatherTemp').innerText = `Temperature: ${weatherInfo.main.temp} °C`;
+      document.getElementById('weatherFeelsLike').innerText = `Feels Like: ${weatherInfo.main.feels_like} °C`;
+      document.getElementById('weatherTempMin').innerText = `Min Temp: ${weatherInfo.main.temp_min} °C`;
+      document.getElementById('weatherTempMax').innerText = `Max Temp: ${weatherInfo.main.temp_max} °C`;
+      document.getElementById('weatherPressure').innerText = `Pressure: ${weatherInfo.main.pressure} hPa`;
+      document.getElementById('weatherSeaLevel').innerText = `Sea Level: ${weatherInfo.main.sea_level || "N/A"} hPa`;
+      document.getElementById('weatherGrndLevel').innerText = `Ground Level: ${weatherInfo.main.grnd_level || "N/A"} hPa`;
+      document.getElementById('weatherVisibility').innerText = `Visibility: ${weatherInfo.visibility / 1000} km`;
+      document.getElementById('weatherHumidity').innerText = `Humidity: ${weatherInfo.main.humidity}%`;
+      document.getElementById('weatherWind').innerText = `Wind Speed: ${weatherInfo.wind.speed} km/hr`;
+      document.getElementById('weatherWindDeg').innerText = `Wind Direction: ${weatherInfo.wind.deg}°`;
+      document.getElementById('weatherWindGust').innerText = `Wind Gusts: ${weatherInfo.wind.gust || "N/A"} m/s`;
+      document.getElementById('weatherClouds').innerText = `Cloudiness: ${weatherInfo.clouds.all}%`;
+
+      const weatherIcon = document.getElementById('weatherIcon');
+      
+      document.querySelector(".weather-info").style.display = "block";
+    }
+
+    document.getElementById('prevRoute').addEventListener('click', () => {
+      if (routes.length > 0 && currentRouteIndex > 0) {
+        currentRouteIndex--;
+        showRoute(currentRouteIndex);
+      }
+    });
+
+    document.getElementById('nextRoute').addEventListener('click', () => {
+      if (routes.length > 0 && currentRouteIndex < routes.length - 1) {
+        currentRouteIndex++;
+        showRoute(currentRouteIndex);
+      }
+    });
+  </script>
+
+</body>
+</html>
